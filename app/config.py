@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     app_name: str = "Atlas Multi-Agent Travel AI"
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
 
     model_config = SettingsConfigDict(
         env_file=".env",

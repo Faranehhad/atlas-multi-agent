@@ -45,15 +45,13 @@ class LLMClient:
         """Generate a response constrained to a Pydantic schema."""
 
         structured_model = self._model.with_structured_output(
-            schema.model_json_schema(),
+            schema,
             method="json_schema",
         )
 
-        response = structured_model.invoke(
+        return structured_model.invoke(
             [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_message),
             ]
         )
-
-        return schema.model_validate(response)
