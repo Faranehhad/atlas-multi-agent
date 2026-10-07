@@ -10,9 +10,8 @@ class Settings(BaseSettings):
 
     app_name: str = "Atlas Multi-Agent Travel AI"
 
-    llm_api_key: str = ""
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
 
     model_config = SettingsConfigDict(
         env_file=".env",
