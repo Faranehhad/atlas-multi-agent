@@ -3,7 +3,7 @@
 import operator
 from typing import Annotated, TypedDict
 
-from app.agents.schemas import QueryPlan
+from app.agents.schemas import QueryPlan, Task
 
 
 class TaskResult(TypedDict):
@@ -22,3 +22,9 @@ class AgentState(TypedDict):
     query_plan: QueryPlan | None
     task_results: Annotated[list[TaskResult], operator.add]
     final_answer: str | None
+
+
+class TaskState(TypedDict):
+    """State passed to an individual task worker."""
+
+    task: Task
