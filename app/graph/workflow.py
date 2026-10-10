@@ -1,6 +1,7 @@
 """LangGraph workflow for Atlas."""
 
 from app.agents.query_analyzer import QueryAnalyzer
+from app.agents.synthesis_agent import SynthesisAgent
 from app.agents.weather_agent import WeatherAgent
 from app.graph.state import AgentState, TaskState
 from langgraph.graph import END, START, StateGraph
@@ -10,8 +11,9 @@ from langgraph.types import Send
 def build_graph(
     query_analyzer: QueryAnalyzer,
     weather_agent: WeatherAgent,
+    synthesis_agent: SynthesisAgent,
 ):
-    """Build and compile the Atlas graph."""
+    """Build and compile the Atlas multi-agent graph."""
 
     def analyze_query(state: AgentState) -> dict:
         """Analyze the request and store the resulting query plan."""
@@ -24,7 +26,7 @@ def build_graph(
         return {"query_plan": query_plan}
 
     def route_tasks(state: AgentState) -> list[Send]:
-        """Dispatch each planned task to an independent worker."""
+        """Dispatch every planned task to an independent worker."""
 
         query_plan = state["query_plan"]
 
@@ -68,17 +70,31 @@ def build_graph(
             ]
         }
 
+    def synthesize_results(state: AgentState) -> dict:
+        """Combine all specialist results into one final answer."""
+
+        final_answer = synthesis_agent.synthesize(
+            user_message=state["user_message"],
+            task_results=state["task_results"],
+        )
+
+        return {"final_answer": final_answer}
+
     builder = StateGraph(AgentState)
 
     builder.add_node("analyze_query", analyze_query)
     builder.add_node("execute_task", execute_task)
+    builder.add_node("synthesize_results", synthesize_results)
 
     builder.add_edge(START, "analyze_query")
+
     builder.add_conditional_edges(
         "analyze_query",
         route_tasks,
         ["execute_task"],
     )
-    builder.add_edge("execute_task", END)
+
+    builder.add_edge("execute_task", "synthesize_results")
+    builder.add_edge("synthesize_results", END)
 
     return builder.compile()
