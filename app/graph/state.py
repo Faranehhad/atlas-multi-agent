@@ -28,3 +28,4 @@ class TaskState(TypedDict):
     """State passed to an individual task worker."""
 
     task: Task
+    conversation_history: list[dict[str, str]]

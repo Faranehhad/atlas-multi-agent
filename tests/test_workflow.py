@@ -6,7 +6,6 @@ from app.graph.workflow import build_graph
 
 def test_graph_fans_out_multiple_tasks():
     query_analyzer = Mock()
-
     query_analyzer.analyze.return_value = QueryPlan(
         tasks=[
             Task(
@@ -27,7 +26,10 @@ def test_graph_fans_out_multiple_tasks():
         ]
     )
 
-    graph = build_graph(query_analyzer)
+    weather_agent = Mock()
+    weather_agent.answer.return_value = "Mock weather forecast."
+
+    graph = build_graph(query_analyzer, weather_agent)
 
     result = graph.invoke(
         {
@@ -45,7 +47,6 @@ def test_graph_fans_out_multiple_tasks():
 
     assert result["query_plan"] is not None
     assert len(result["query_plan"].tasks) == 3
-
     assert len(result["task_results"]) == 3
 
     result_by_id = {
@@ -54,13 +55,21 @@ def test_graph_fans_out_multiple_tasks():
     }
 
     assert result_by_id["task_1"]["task_type"] == "weather"
+    assert result_by_id["task_1"]["answer"] == "Mock weather forecast."
+
     assert result_by_id["task_2"]["task_type"] == "city_info"
+    assert result_by_id["task_2"]["answer"] != "Mock weather forecast."
+
     assert result_by_id["task_3"]["task_type"] == "github"
 
+    weather_agent.answer.assert_called_once_with(
+        user_message="What is the weather in Prague tomorrow?",
+        conversation_history=[],
+    )
 
-def test_graph_handles_single_task():
+
+def test_graph_handles_single_weather_task():
     query_analyzer = Mock()
-
     query_analyzer.analyze.return_value = QueryPlan(
         tasks=[
             Task(
@@ -71,7 +80,10 @@ def test_graph_handles_single_task():
         ]
     )
 
-    graph = build_graph(query_analyzer)
+    weather_agent = Mock()
+    weather_agent.answer.return_value = "Mock weather forecast."
+
+    graph = build_graph(query_analyzer, weather_agent)
 
     result = graph.invoke(
         {
@@ -84,4 +96,5 @@ def test_graph_handles_single_task():
     )
 
     assert len(result["task_results"]) == 1
-    assert result["task_results"][0]["task_id"] == "task_1"
+    assert result["task_results"][0]["answer"] == "Mock weather forecast."
+    weather_agent.answer.assert_called_once()
