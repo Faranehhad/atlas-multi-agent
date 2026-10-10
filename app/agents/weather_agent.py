@@ -6,25 +6,26 @@ from zoneinfo import ZoneInfo
 
 from app.agents.weather_schemas import WeatherRequest
 from app.llm.client import LLMClient
-from app.tools.weather import (
-    OpenMeteoClient,
-    WeatherAPIError,
-)
+from app.tools.weather import OpenMeteoClient, WeatherAPIError
 
 
 WEATHER_REQUEST_PROMPT = """
-You interpret weather questions for Atlas.
+You interpret weather requests for Atlas.
 
-Extract the requested location and inclusive start/end dates.
+Use the user's complete message and conversation history to understand
+the requested location, whether they want current conditions or a forecast,
+and the dates they want.
 
 Rules:
-- Use the reference date supplied in the user message to resolve relative
-  dates, weekdays, weekends, and other natural-language date expressions.
-- Use conversation history to resolve references and omitted locations.
-- Do not guess a location. Return null if it cannot be resolved.
-- If no period is specified, use the reference date for both dates.
+- Use request_type="current" for a request about conditions at the present
+  time. Use request_type="forecast" for a future date or date range.
+- Resolve references such as "there" using conversation history.
+- Do not guess an unresolved location; return null instead.
+- The reference date and Europe/Prague time zone are supplied in the input.
+- Resolve relative dates and date ranges using that reference date.
+- For a current-weather request, set start_date and end_date to null.
+- For a forecast request, provide inclusive start_date and end_date.
 - Return dates in YYYY-MM-DD format.
-- Set start_date and end_date to the complete requested date range.
 - Do not answer the weather question.
 """
 
@@ -32,18 +33,16 @@ Rules:
 WEATHER_ANSWER_PROMPT = """
 You are Atlas's weather assistant.
 
-Answer the user's original question using only the supplied forecast data.
+Answer the original question using only the supplied weather data.
 
 Rules:
-- Do not invent weather observations or forecast values.
+- Do not invent observations or forecast values.
 - Use Celsius for temperatures and km/h for wind speeds.
 - Explain precipitation probabilities clearly when available.
-- Explain the weather conditions using the supplied weather codes only
-  when you can do so confidently.
-- State the relevant forecast dates.
-- If a data field is missing, do not invent it.
-- If the user asks for advice, such as whether to bring an umbrella,
-  base it on the forecast data and explain the reason.
+- Describe weather codes only when their meaning is known confidently.
+- State the relevant observation time or forecast dates.
+- Do not invent values for missing fields.
+- If the user asks for advice, base it on the available weather data.
 - Be clear and concise.
 """
 
@@ -72,7 +71,7 @@ class WeatherAgent:
         user_message: str,
         conversation_history: list[dict[str, str]] | None = None,
     ) -> str:
-        """Answer a weather question using live forecast data."""
+        """Answer a weather question using current or forecast data."""
 
         today = self._today_provider()
         history = conversation_history or []
@@ -105,110 +104,174 @@ CURRENT USER QUESTION:
         )
 
         if not request.location or not request.location.strip():
-            return "Which city or location would you like the weather forecast for?"
-
-        try:
-            start_date = date.fromisoformat(request.start_date)
-            end_date = date.fromisoformat(request.end_date)
-        except ValueError:
-            return (
-                "I couldn't determine the requested forecast dates. "
-                "Could you clarify which dates you mean?"
-            )
-
-        if end_date < start_date:
-            return (
-                "I couldn't determine a valid date range. "
-                "Could you clarify the dates you want?"
-            )
-
-        if start_date < today:
-            return (
-                "I can retrieve forecasts for today and future dates, "
-                "but the current weather source does not provide "
-                "historical weather through this forecast endpoint."
-            )
-
-        forecast_days = (end_date - today).days + 1
-
-        if forecast_days > 16:
-            return (
-                "The current weather source supports forecasts up to "
-                "16 days ahead. Please choose a date range within that period."
-            )
+            return "Which city or location would you like the weather for?"
 
         try:
             location = self._weather_client.search_location(request.location)
-            forecasts = self._weather_client.get_daily_forecast(
-                location,
-                forecast_days=forecast_days,
-            )
-        except WeatherAPIError:
-            return (
-                "I couldn't retrieve the weather forecast right now. "
-                "Please try again shortly."
-            )
 
-        selected_forecasts = [
-            forecast
-            for forecast in forecasts
-            if start_date.isoformat() <= forecast.date <= end_date.isoformat()
-        ]
+            if request.request_type == "current":
+                current = self._weather_client.get_current_weather(location)
 
-        if not selected_forecasts:
-            return (
-                "The weather service returned no forecast data "
-                "for the requested dates."
-            )
+                weather_lines = [
+                    f"Observation time: {current.time}",
+                ]
 
-        forecast_lines = []
+                if current.temperature_c is not None:
+                    weather_lines.append(
+                        f"Temperature: {current.temperature_c} °C"
+                    )
+                if current.apparent_temperature_c is not None:
+                    weather_lines.append(
+                        f"Feels like: {current.apparent_temperature_c} °C"
+                    )
+                if current.relative_humidity_percent is not None:
+                    weather_lines.append(
+                        f"Relative humidity: "
+                        f"{current.relative_humidity_percent}%"
+                    )
+                if current.precipitation_mm is not None:
+                    weather_lines.append(
+                        f"Precipitation: {current.precipitation_mm} mm"
+                    )
+                if current.weather_code is not None:
+                    weather_lines.append(
+                        f"WMO weather code: {current.weather_code}"
+                    )
+                if current.wind_speed_kmh is not None:
+                    weather_lines.append(
+                        f"Wind speed: {current.wind_speed_kmh} km/h"
+                    )
+                if current.wind_direction_degrees is not None:
+                    weather_lines.append(
+                        "Wind direction: "
+                        f"{current.wind_direction_degrees} degrees"
+                    )
 
-        for forecast in selected_forecasts:
-            values = [f"Date: {forecast.date}"]
-
-            if forecast.temperature_max_c is not None:
-                values.append(
-                    f"Maximum temperature: {forecast.temperature_max_c} °C"
-                )
-
-            if forecast.temperature_min_c is not None:
-                values.append(
-                    f"Minimum temperature: {forecast.temperature_min_c} °C"
-                )
-
-            if forecast.precipitation_probability_max_percent is not None:
-                values.append(
-                    "Maximum precipitation probability: "
-                    f"{forecast.precipitation_probability_max_percent}%"
-                )
-
-            if forecast.weather_code is not None:
-                values.append(f"WMO weather code: {forecast.weather_code}")
-
-            if forecast.wind_speed_max_kmh is not None:
-                values.append(
-                    f"Maximum wind speed: {forecast.wind_speed_max_kmh} km/h"
-                )
-
-            forecast_lines.append("; ".join(values))
-
-        country = f", {location.country}" if location.country else ""
-
-        answer_input = f"""
+                answer_input = f"""
 ORIGINAL USER QUESTION:
 {user_message}
 
 RESOLVED LOCATION:
-{location.name}{country}
+{location.name}, {location.country or "country not specified"}
+
+CURRENT CONDITIONS:
+<weather_data>
+{"\n".join(weather_lines)}
+</weather_data>
+"""
+
+            else:
+                if not request.start_date or not request.end_date:
+                    return (
+                        "I couldn't determine the forecast dates. "
+                        "Could you clarify which dates you mean?"
+                    )
+
+                try:
+                    start_date = date.fromisoformat(request.start_date)
+                    end_date = date.fromisoformat(request.end_date)
+                except ValueError:
+                    return (
+                        "I couldn't determine valid forecast dates. "
+                        "Could you clarify which dates you mean?"
+                    )
+
+                if end_date < start_date:
+                    return (
+                        "I couldn't determine a valid date range. "
+                        "Could you clarify the dates you want?"
+                    )
+
+                if start_date < today:
+                    return (
+                        "This forecast endpoint does not provide historical "
+                        "weather for dates before today."
+                    )
+
+                forecast_days = (end_date - today).days + 1
+
+                if forecast_days > 16:
+                    return (
+                        "The weather service supports forecasts up to "
+                        "16 days ahead. Please choose a date range within "
+                        "that period."
+                    )
+
+                forecasts = self._weather_client.get_daily_forecast(
+                    location,
+                    forecast_days=forecast_days,
+                )
+
+                selected_forecasts = [
+                    forecast
+                    for forecast in forecasts
+                    if start_date.isoformat()
+                    <= forecast.date
+                    <= end_date.isoformat()
+                ]
+
+                if not selected_forecasts:
+                    return (
+                        "The weather service returned no forecast data "
+                        "for the requested dates."
+                    )
+
+                forecast_lines = []
+
+                for forecast in selected_forecasts:
+                    values = [f"Date: {forecast.date}"]
+
+                    if forecast.temperature_max_c is not None:
+                        values.append(
+                            f"Maximum temperature: "
+                            f"{forecast.temperature_max_c} °C"
+                        )
+                    if forecast.temperature_min_c is not None:
+                        values.append(
+                            f"Minimum temperature: "
+                            f"{forecast.temperature_min_c} °C"
+                        )
+                    if (
+                        forecast.precipitation_probability_max_percent
+                        is not None
+                    ):
+                        values.append(
+                            "Maximum precipitation probability: "
+                            f"{forecast.precipitation_probability_max_percent}%"
+                        )
+                    if forecast.weather_code is not None:
+                        values.append(
+                            f"WMO weather code: {forecast.weather_code}"
+                        )
+                    if forecast.wind_speed_max_kmh is not None:
+                        values.append(
+                            f"Maximum wind speed: "
+                            f"{forecast.wind_speed_max_kmh} km/h"
+                        )
+
+                    forecast_lines.append("; ".join(values))
+
+                answer_input = f"""
+ORIGINAL USER QUESTION:
+{user_message}
+
+RESOLVED LOCATION:
+{location.name}, {location.country or "country not specified"}
 
 REQUESTED DATES:
 {start_date.isoformat()} through {end_date.isoformat()}
 
 FORECAST DATA:
-<forecast_data>
+<weather_data>
 {"\n".join(forecast_lines)}
-</forecast_data>
+</weather_data>
 """
+
+        except WeatherAPIError:
+            return (
+                "I couldn't retrieve the weather data right now. "
+                "Please try again shortly."
+            )
 
         return self._llm.generate(
             system_prompt=WEATHER_ANSWER_PROMPT,

@@ -1,5 +1,7 @@
 """Structured output schemas for the Weather Agent."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -15,10 +17,25 @@ class WeatherRequest(BaseModel):
         ),
     )
 
-    start_date: str = Field(
-        description="Start date of the requested forecast in YYYY-MM-DD format.",
+    request_type: Literal["current", "forecast"] = Field(
+        description=(
+            "Whether the user requests current weather conditions "
+            "or a forecast for a date or date range."
+        ),
     )
 
-    end_date: str = Field(
-        description="End date of the requested forecast in YYYY-MM-DD format.",
+    start_date: str | None = Field(
+        default=None,
+        description=(
+            "Start date of a forecast in YYYY-MM-DD format. "
+            "Null for a request for current conditions."
+        ),
+    )
+
+    end_date: str | None = Field(
+        default=None,
+        description=(
+            "End date of a forecast in YYYY-MM-DD format. "
+            "Null for a request for current conditions."
+        ),
     )

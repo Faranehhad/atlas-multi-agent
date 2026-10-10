@@ -117,3 +117,61 @@ def test_api_connection_error_is_wrapped():
 
     with pytest.raises(WeatherAPIError):
         weather_client.search_location("Prague")
+
+
+def test_get_current_weather_parses_response():
+    http_client = Mock()
+    response = Mock()
+    response.json.return_value = {
+        "current": {
+            "time": "2026-10-10T12:00",
+            "temperature_2m": 14.1,
+            "relative_humidity_2m": 65,
+            "apparent_temperature": 13.5,
+            "is_day": 1,
+            "precipitation": 0.0,
+            "weather_code": 2,
+            "wind_speed_10m": 12.5,
+            "wind_direction_10m": 240,
+        }
+    }
+    http_client.get.return_value = response
+
+    weather_client = OpenMeteoClient(client=http_client)
+    location = WeatherLocation(
+        name="Brno",
+        country="Czechia",
+        latitude=49.1951,
+        longitude=16.6068,
+        timezone="Europe/Prague",
+    )
+
+    current = weather_client.get_current_weather(location)
+
+    assert current.time == "2026-10-10T12:00"
+    assert current.temperature_c == 14.1
+    assert current.relative_humidity_percent == 65
+    assert current.apparent_temperature_c == 13.5
+    assert current.precipitation_mm == 0.0
+    assert current.wind_speed_kmh == 12.5
+
+    params = http_client.get.call_args.kwargs["params"]
+    assert "current" in params
+    assert params["timezone"] == "Europe/Prague"
+
+
+def test_get_current_weather_rejects_missing_current_data():
+    http_client = Mock()
+    response = Mock()
+    response.json.return_value = {"daily": {"time": []}}
+    http_client.get.return_value = response
+
+    weather_client = OpenMeteoClient(client=http_client)
+    location = WeatherLocation(
+        name="Brno",
+        latitude=49.1951,
+        longitude=16.6068,
+    )
+
+    with pytest.raises(WeatherAPIError):
+        weather_client.get_current_weather(location)

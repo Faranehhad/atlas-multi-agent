@@ -37,6 +37,20 @@ class DailyForecast(BaseModel):
     wind_speed_max_kmh: float | None = None
 
 
+class CurrentWeather(BaseModel):
+    """Current weather conditions returned by Open-Meteo."""
+
+    time: str
+    temperature_c: float | None = None
+    relative_humidity_percent: int | None = None
+    apparent_temperature_c: float | None = None
+    is_day: int | None = None
+    precipitation_mm: float | None = None
+    weather_code: int | None = None
+    wind_speed_kmh: float | None = None
+    wind_direction_degrees: float | None = None
+
+
 class OpenMeteoClient:
     """Client for Open-Meteo geocoding and weather forecast endpoints."""
 
@@ -170,3 +184,51 @@ class OpenMeteoClient:
             )
 
         return forecasts
+
+    def get_current_weather(
+        self,
+        location: WeatherLocation,
+    ) -> CurrentWeather:
+        """Retrieve current weather conditions for a resolved location."""
+
+        payload = self._get_json(
+            FORECAST_URL,
+            params={
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "current": (
+                    "temperature_2m,"
+                    "relative_humidity_2m,"
+                    "apparent_temperature,"
+                    "is_day,"
+                    "precipitation,"
+                    "weather_code,"
+                    "wind_speed_10m,"
+                    "wind_direction_10m"
+                ),
+                "timezone": location.timezone,
+            },
+        )
+
+        current = payload.get("current")
+        if not isinstance(current, dict):
+            raise WeatherAPIError(
+                "The Open-Meteo response does not contain current conditions."
+            )
+
+        try:
+            return CurrentWeather(
+                time=current["time"],
+                temperature_c=current.get("temperature_2m"),
+                relative_humidity_percent=current.get("relative_humidity_2m"),
+                apparent_temperature_c=current.get("apparent_temperature"),
+                is_day=current.get("is_day"),
+                precipitation_mm=current.get("precipitation"),
+                weather_code=current.get("weather_code"),
+                wind_speed_kmh=current.get("wind_speed_10m"),
+                wind_direction_degrees=current.get("wind_direction_10m"),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WeatherAPIError(
+                "The Open-Meteo current-weather response was invalid."
+            ) from exc
